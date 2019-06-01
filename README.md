@@ -1,0 +1,1 @@
+It's a sandbox project to test libraries ZIO and SCodec.

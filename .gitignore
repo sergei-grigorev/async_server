@@ -1,0 +1,10 @@
+# IntelliJ
+.idea
+/target
+/project/target
+
+# bloop
+/.bloop
+/.metals
+/project/.bloop
+

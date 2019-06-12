@@ -7,11 +7,11 @@ import org.scalacheck.Arbitrary
 import org.scalacheck.Prop._
 import org.typelevel.discipline.Laws
 
-trait SerializerTests[A, B] extends Laws {
-  def laws: SerializerLaws[A, B]
+trait SerializerTests[A] extends Laws {
+  def laws: SerializerLaws[A]
 
-  def algebra(implicit arbContent: Arbitrary[B],
-              eqOptContentA: Eq[Either[Serializer.DeserializeError, B]]) =
+  def algebra(implicit arbContent: Arbitrary[A],
+              eqOptContentA: Eq[Either[Serializer.SerializeError, A]]) =
     new SimpleRuleSet(
       name = "Serializer",
       "deserialized is equal original" -> forAll(laws.deserializeSerialized _),
@@ -20,8 +20,8 @@ trait SerializerTests[A, B] extends Laws {
 }
 
 object SerializerTests {
-  def apply[A, B](instance: Serializer.Service[A, B]): SerializerTests[A, B] =
-    new SerializerTests[A, B] {
-      override val laws: SerializerLaws[A, B] = SerializerLaws(instance)
+  def apply[A](instance: Serializer.Service[A]): SerializerTests[A] =
+    new SerializerTests[A] {
+      override val laws: SerializerLaws[A] = SerializerLaws(instance)
     }
 }

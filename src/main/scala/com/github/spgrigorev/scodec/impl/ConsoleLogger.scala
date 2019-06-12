@@ -10,5 +10,8 @@ trait ConsoleLogger extends Logger {
 
     override def error(error: String): UIO[Unit] =
       UIO(System.err.println(s"ERROR: $error"))
+
+    override def warn(message: String): UIO[Unit] =
+      UIO(System.out.println(s"WARN: $message"))
   }
 }

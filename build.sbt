@@ -7,6 +7,7 @@ scalaVersion := "2.12.8"
 addCompilerPlugin("org.typelevel" %% "kind-projector" % "0.10.1")
 
 libraryDependencies ++= Seq(
+  "org.scodec" %% "scodec-core" % "1.11.3",
   "org.scalaz" %% "scalaz-zio" % "1.0-RC5",
   "org.scalaz" %% "scalaz-zio-interop-cats" % "1.0-RC5",
   "org.typelevel" %% "cats-core" % "1.6.0",

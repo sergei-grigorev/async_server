@@ -1,45 +1,44 @@
 package com.github.spgrigorev.scodec.algebras
 
-import cats.data.NonEmptyList
 import scalaz.zio.ZIO
+import scodec.bits.BitVector
 
 /**
   * Serialization service.
   *
-  * @tparam BUFFER IO buffer
   * @tparam MESSAGE message type
   */
-trait Serializer[BUFFER, MESSAGE] {
-  def serializer: Serializer.Service[BUFFER, MESSAGE]
+trait Serializer[MESSAGE] {
+  def serializer: Serializer.Service[MESSAGE]
 }
 
 object Serializer {
-  trait Service[BUFFER, MESSAGE] {
+  trait Service[MESSAGE] {
     def deserialize(
-        buffer: BUFFER): Either[DeserializeError, MessageState[BUFFER, MESSAGE]]
-    def serialize(message: MESSAGE): BUFFER
+        buffer: BitVector): Either[SerializeError, MessageState[MESSAGE]]
+
+    def serialize(message: MESSAGE): Either[SerializeError, BitVector]
   }
 
   object algebra {
-    def serialize[BUFFER, MESSAGE](
-        message: BUFFER): ZIO[Serializer[MESSAGE, BUFFER], Nothing, MESSAGE] =
-      ZIO.access[Serializer[MESSAGE, BUFFER]](_.serializer.serialize(message))
+    def serialize[MESSAGE](
+        message: MESSAGE): ZIO[Serializer[MESSAGE], SerializeError, BitVector] =
+      ZIO.accessM[Serializer[MESSAGE]](c =>
+        ZIO.fromEither(c.serializer.serialize(message)))
 
-    def deserialize[MESSAGE, BUFFER](buffer: MESSAGE)
-      : ZIO[Serializer[MESSAGE, BUFFER],
-            Nothing,
-            Either[DeserializeError, MessageState[MESSAGE, BUFFER]]] =
-      ZIO.access(_.serializer.deserialize(buffer))
+    def deserialize[MESSAGE](buffer: BitVector)
+      : ZIO[Serializer[MESSAGE], SerializeError, MessageState[MESSAGE]] =
+      ZIO.accessM(c => ZIO.fromEither(c.serializer.deserialize(buffer)))
   }
 
-  type MessageState[BUFFER, MESSAGE] = (BUFFER, NonEmptyList[MESSAGE])
+  type MessageState[MESSAGE] = (BitVector, MESSAGE)
 
-  sealed trait DeserializeError extends Product with Serializable
-  object DeserializeError {
-    case object NotEnough extends DeserializeError
-    case class WrongContent(message: String) extends DeserializeError
+  sealed trait SerializeError extends Product with Serializable
+  object SerializeError {
+    case object NotEnough extends SerializeError
+    case class WrongContent(error: String) extends SerializeError
 
-    def notEnough(): DeserializeError = NotEnough
-    def wrongContent(message: String): DeserializeError = WrongContent(message)
+    def notEnough(): SerializeError = NotEnough
+    def wrongContent(message: String): SerializeError = WrongContent(message)
   }
 }

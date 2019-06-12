@@ -1,87 +1,102 @@
 package com.github.spgrigorev.scodec.basic
 
+import cats.Show
 import cats.instances.list._
 import cats.syntax.traverse._
+import com.github.spgrigorev.scodec.algebras.Connection.algebra._
+import com.github.spgrigorev.scodec.algebras.Logger.algebra._
 import com.github.spgrigorev.scodec.algebras.NetworkProtocol
 import com.github.spgrigorev.scodec.algebras.NetworkProtocol.ServiceEnvironment
-import com.github.spgrigorev.scodec.algebras.Serializer.DeserializeError
-import com.github.spgrigorev.scodec.data.Buffer
+import com.github.spgrigorev.scodec.algebras.Serializer.SerializeError
+import com.github.spgrigorev.scodec.algebras.Serializer.algebra._
 import com.github.spgrigorev.scodec.domain.ClientError
-import com.github.spgrigorev.scodec.syntax.buffer._
-import eu.timepit.refined.types.numeric.NonNegInt
 import scalaz.zio.interop.catz._
-import scalaz.zio.{IO, Ref, UIO, ZIO}
+import scalaz.zio.{IO, UIO, ZIO}
+import scodec.bits.BitVector
 
 /**
   * Basic protocol with [request -> response] model.
   *
-  * @tparam BUFFER     IO Buffer type
   * @tparam MESSAGE    Deserialized messages type
   * @tparam STATE      intermediate state
   * @tparam CONNECTION network connection type
   */
-trait RequestResponseProtocol[BUFFER, MESSAGE, STATE, CONNECTION]
-    extends NetworkProtocol.Service[CONNECTION, BUFFER, MESSAGE] {
+trait RequestResponseProtocol[MESSAGE, STATE, CONNECTION]
+    extends NetworkProtocol.Service[CONNECTION, MESSAGE] {
 
-  type ClientErrorIO[A] =
-    ZIO[ServiceEnvironment[CONNECTION, BUFFER, MESSAGE], ClientError, A]
+  type FixedEnvironment =
+    ServiceEnvironment[CONNECTION, MESSAGE]
 
-  import com.github.spgrigorev.scodec.algebras.Connection.algebra._
-  import com.github.spgrigorev.scodec.algebras.Serializer.algebra._
+  private type ClientErrorIO[A] =
+    ZIO[FixedEnvironment, ClientError, A]
 
-  def makeNewState(connection: CONNECTION): UIO[Ref[STATE]]
+  def makeNewState(connection: CONNECTION): UIO[STATE]
 
-  def callback(messages: MESSAGE,
-               state: Ref[STATE]): IO[ClientError, List[MESSAGE]]
-
-  val initBufferSize: NonNegInt
+  def callback(message: MESSAGE,
+               state: STATE): IO[ClientError, (List[MESSAGE], STATE)]
 
   final override def registerClient(connection: CONNECTION)(
-      implicit BUFFER: Buffer[BUFFER]): ClientErrorIO[Unit] = {
-    def listener(buffer: BUFFER, state: Ref[STATE]): ClientErrorIO[Unit] = {
-      read(buffer, connection)
-        .flatMap { buffer =>
-          deserialize[BUFFER, MESSAGE](buffer.asReadOnly)
-            .flatMap {
-              case Left(DeserializeError.NotEnough) =>
-                if (!BUFFER.isFull(buffer)) {
-                  listener(buffer, state)
-                } else {
-                  listener(buffer.increaseCapacity, state)
-                }
+      implicit connectionShow: Show[CONNECTION]): ClientErrorIO[Unit] = {
 
-              case Left(DeserializeError.WrongContent(_)) =>
-                ZIO.fail(ClientError.ClosedConnection)
+    def next(buffer: BitVector)(
+        state: STATE): ZIO[FixedEnvironment, Nothing, Unit] =
+      listener(buffer, state)
 
-              case Right((remained, messages)) =>
-                val response =
-                  messages.toList
-                    .traverse[ClientErrorIO, List[MESSAGE]](m =>
-                      callback(m, state))
-                    .map(_.flatten)
+    def listener(buffer: BitVector,
+                 state: STATE): ZIO[FixedEnvironment, Nothing, Unit] = {
 
-                val output =
-                  response
-                    .flatMap { outputList =>
-                      outputList.traverse[ClientErrorIO, Unit] { m =>
-                        serialize(m) >>= write(connection)
+      deserialize[MESSAGE](buffer)
+        .foldM[FixedEnvironment, ClientError, Unit](
+          {
+            case SerializeError.NotEnough =>
+              read(buffer, connection).flatMap(buffer =>
+                listener(buffer, state))
+
+            case SerializeError.WrongContent(message) =>
+              error(message, connection) *>
+                ZIO.fail(ClientError.closedConnection)
+          }, {
+            case (remained, message) =>
+              val updState =
+                for {
+                  response <- callback(message, state)
+                  (outputMessages, updState) = response
+
+                  serialized <- outputMessages
+                    .traverse[ClientErrorIO, BitVector] { m =>
+                      serialize(m).mapError {
+                        case SerializeError.NotEnough =>
+                          ClientError.incorrectProtocol(
+                            "server generated incomplete message")
+                        case SerializeError.WrongContent(error) =>
+                          ClientError.incorrectProtocol(error)
                       }
                     }
+                  _ <- serialized.traverse[ClientErrorIO, Unit](
+                    write(connection))
+                } yield updState
 
-                output *>
-                  listener(buffer.compact(remained.consumed), state)
-            }
-
-        }
-        .catchSome {
+              updState >>= next(remained)
+          }
+        )
+        .catchAll {
           case ClientError.ClosedConnection =>
             ZIO.unit
+
+          case ClientError.ReadTimeout =>
+            warn("read timeout", connection) *> ZIO.unit
+
+          case ClientError.WriteTimeout =>
+            warn("write timeout", connection) *> ZIO.unit
+
+          case ClientError.IncorrectProtocol(error) =>
+            warn("incorrect protocol: " + error, connection) *> ZIO.unit
         }
     }
 
     for {
       state <- this.makeNewState(connection)
-      _ <- listener(BUFFER.allocate(initBufferSize), state)
+      _ <- listener(BitVector.empty, state)
     } yield ()
   }
 }

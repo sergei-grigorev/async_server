@@ -1,34 +1,38 @@
 package com.github.spgrigorev.scodec.laws
 
-import com.github.spgrigorev.scodec.algebras.Serializer
 import cats.kernel.laws._
 import cats.syntax.either._
+import com.github.spgrigorev.scodec.algebras.Serializer
 
-trait SerializerLaws[A, B] {
-  def algebra: Serializer.Service[A, B]
+trait SerializerLaws[A] {
+  def algebra: Serializer.Service[A]
 
   def deserializeSerialized(
-      content: B): IsEq[Either[Serializer.DeserializeError, B]] = {
-    val serialized = algebra.serialize(content)
-    val deserialized = algebra.deserialize(serialized).map(_._2.head)
-    deserialized <-> content.asRight[Serializer.DeserializeError]
+      content: A): IsEq[Either[Serializer.SerializeError, A]] = {
+    val deserialized = algebra
+      .serialize(content)
+      .flatMap(serialized => algebra.deserialize(serialized))
+      .map(_._2)
+    deserialized <-> content.asRight[Serializer.SerializeError]
   }
 
   def deserializedOnlyOnce(
-      content: B): IsEq[Either[Serializer.DeserializeError, B]] = {
-    val serialized = algebra.serialize(content)
-    val secondTime =
+      content: A): IsEq[Either[Serializer.SerializeError, A]] = {
+    val twiceDeserialized =
       for {
-        updatedBuffer <- algebra.deserialize(serialized).map(_._1)
-        secondTime <- algebra.deserialize(updatedBuffer)
-      } yield secondTime._2.head
-    secondTime <-> Serializer.DeserializeError.notEnough().asLeft[B]
+        serialized <- algebra.serialize(content)
+        first <- algebra.deserialize(serialized)
+        (remainer, _) = first
+        second <- algebra.deserialize(remainer)
+        (_, result) = second
+      } yield result
+    twiceDeserialized <-> Serializer.SerializeError.notEnough().asLeft[A]
   }
 }
 
 object SerializerLaws {
-  def apply[A, B](instance: Serializer.Service[A, B]): SerializerLaws[A, B] =
-    new SerializerLaws[A, B] {
-      override def algebra: Serializer.Service[A, B] = instance
+  def apply[A](instance: Serializer.Service[A]): SerializerLaws[A] =
+    new SerializerLaws[A] {
+      override def algebra: Serializer.Service[A] = instance
     }
 }

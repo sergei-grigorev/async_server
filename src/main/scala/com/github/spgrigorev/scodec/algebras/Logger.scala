@@ -12,14 +12,14 @@ object Logger {
   trait Service {
     def info(message: String): ZIO[Logger, Nothing, Unit]
     def error(error: String): ZIO[Logger, Nothing, Unit]
+    def warn(message: String): ZIO[Logger, Nothing, Unit]
   }
 
   object algebra {
     def info[S: Show](message: S): ZIO[Logger, Nothing, Unit] =
       ZIO.accessM(_.logger.info(message.show))
 
-    def info[S: Show](message: String,
-                      content: S): ZIO[Logger, Nothing, Unit] =
+    def info[S: Show](message: String, content: S): ZIO[Logger, Nothing, Unit] =
       ZIO.accessM(_.logger.info(message + content.show))
 
     def error[S: Show](error: S): ZIO[Logger, Nothing, Unit] =
@@ -28,5 +28,8 @@ object Logger {
     def error[S: Show](message: String,
                        content: S): ZIO[Logger, Nothing, Unit] =
       ZIO.accessM(_.logger.error(message + content.show))
+
+    def warn[S: Show](message: String, content: S): ZIO[Logger, Nothing, Unit] =
+      ZIO.accessM(_.logger.warn(message + content.show))
   }
 }

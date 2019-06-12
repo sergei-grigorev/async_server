@@ -1,7 +1,6 @@
 package com.github.spgrigorev.scodec.algebras
 
 import cats.Show
-import com.github.spgrigorev.scodec.data.Buffer
 import com.github.spgrigorev.scodec.domain.ClientError
 import scalaz.zio.ZIO
 
@@ -11,32 +10,31 @@ import scala.language.higherKinds
   * Handshake protocol.
   *
   * @tparam CONNECTION connection type
-  * @tparam BUFFER connection buffer type
   * @tparam MESSAGE user message type
   */
-trait NetworkProtocol[CONNECTION, BUFFER, MESSAGE] {
-  def protocol: NetworkProtocol.Service[CONNECTION, BUFFER, MESSAGE]
+trait NetworkProtocol[CONNECTION, MESSAGE] {
+  def protocol: NetworkProtocol.Service[CONNECTION, MESSAGE]
 }
 
 object NetworkProtocol {
-  type Environment[CONNECTION, BUFFER, MESSAGE] =
-    NetworkProtocol[CONNECTION, BUFFER, MESSAGE]
-      with Connection[CONNECTION, BUFFER]
-      with Serializer[BUFFER, MESSAGE]
+  type Environment[CONNECTION, MESSAGE] =
+    NetworkProtocol[CONNECTION, MESSAGE]
+      with Connection[CONNECTION]
+      with Serializer[MESSAGE]
       with Logger
 
-  type ServiceEnvironment[CONNECTION, BUFFER, MESSAGE] =
-    Connection[CONNECTION, BUFFER] with Serializer[BUFFER, MESSAGE] with Logger
+  type ServiceEnvironment[CONNECTION, MESSAGE] =
+    Connection[CONNECTION] with Serializer[MESSAGE] with Logger
 
-  trait Service[CONNECTION, BUFFER, MESSAGE] {
-    def registerClient(connection: CONNECTION)(implicit BUFFER: Buffer[BUFFER])
-      : ZIO[ServiceEnvironment[CONNECTION, BUFFER, MESSAGE], ClientError, Unit]
+  trait Service[CONNECTION, MESSAGE] {
+    def registerClient(connection: CONNECTION)(
+        implicit connectionShow: Show[CONNECTION])
+      : ZIO[ServiceEnvironment[CONNECTION, MESSAGE], ClientError, Unit]
   }
 
   object algebra {
-    def registerClient[CONNECTION: Show, BUFFER: Buffer, MESSAGE](
-        connection: CONNECTION)
-      : ZIO[Environment[CONNECTION, BUFFER, MESSAGE], ClientError, Unit] =
+    def registerClient[CONNECTION: Show, MESSAGE](connection: CONNECTION)
+      : ZIO[Environment[CONNECTION, MESSAGE], ClientError, Unit] =
       ZIO.accessM(_.protocol.registerClient(connection))
   }
 }
